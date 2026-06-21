@@ -43,6 +43,12 @@ let cropRect = null;
 let dragState = null;
 let cropShape = "circle";
 let background = { ...defaultBackground };
+let sourceCanvas = null;
+let sourceContext = null;
+let sourceImageData = null;
+let resultCanvas = null;
+let resultContext = null;
+let resultImageData = null;
 
 fileInput.addEventListener("change", () => {
   const [file] = fileInput.files;
@@ -247,8 +253,9 @@ function prepareCanvas(width, height) {
   const scale = Math.min(1, 1800 / longestSide);
   previewWidth = Math.max(1, Math.round(width * scale));
   previewHeight = Math.max(1, Math.round(height * scale));
-  canvas.width = previewWidth;
-  canvas.height = previewHeight;
+  ensureCanvasSize(canvas, previewWidth, previewHeight);
+  sourceImageData = null;
+  resultImageData = null;
 }
 
 function renderLivePreview() {
@@ -256,8 +263,7 @@ function renderLivePreview() {
     return;
   }
 
-  canvas.width = previewWidth;
-  canvas.height = previewHeight;
+  ensureCanvasSize(canvas, previewWidth, previewHeight);
   const crop = sanitizeCropRect(cropRect, previewWidth, previewHeight);
   const output = createResultCanvas(crop);
 
@@ -266,64 +272,140 @@ function renderLivePreview() {
 }
 
 function createResultCanvas(crop) {
-  const outputCanvas = document.createElement("canvas");
-  const outputContext = outputCanvas.getContext("2d", { willReadFrequently: true });
-
-  const sourceCanvas = document.createElement("canvas");
-  const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
-  sourceCanvas.width = previewWidth;
-  sourceCanvas.height = previewHeight;
-  sourceContext.drawImage(sourceBitmap, 0, 0, previewWidth, previewHeight);
-
   const outputWidth = Math.max(1, Math.round(crop.width));
   const outputHeight = Math.max(1, Math.round(crop.height));
-  outputCanvas.width = outputWidth;
-  outputCanvas.height = outputHeight;
-
-  const source = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
-  const result = outputContext.createImageData(outputWidth, outputHeight);
+  const outputCanvas = getResultCanvas(outputWidth, outputHeight);
+  const source = getSourceImageData();
+  const result = getResultImageData(outputWidth, outputHeight);
+  const sourceData = source.data;
+  const targetData = result.data;
   const strength = Number(strengthInput.value) / 100;
   const intensity = strength * 1.4;
+  const backgroundColors = getBackgroundColors();
 
   for (let y = 0; y < outputHeight; y += 1) {
     for (let x = 0; x < outputWidth; x += 1) {
       const targetIndex = (y * outputWidth + x) * 4;
 
       if (!isInsideShape(x, y, outputWidth, outputHeight)) {
-        fillPixel(result.data, targetIndex, getBackgroundColor(x, y, outputWidth, outputHeight));
+        fillBackgroundPixel(targetData, targetIndex, x, y, outputWidth, outputHeight, backgroundColors);
         continue;
       }
 
-      const sourcePoint = getFisheyeSourcePoint(x, y, outputWidth, outputHeight, strength, intensity);
-      const sourceX = crop.x + sourcePoint.x;
-      const sourceY = crop.y + sourcePoint.y;
-      sampleBilinear(source.data, result.data, sourceCanvas.width, sourceCanvas.height, sourceX, sourceY, targetIndex);
+      sampleBilinearPoint(
+        sourceData,
+        targetData,
+        previewWidth,
+        previewHeight,
+        crop,
+        x,
+        y,
+        outputWidth,
+        outputHeight,
+        strength,
+        intensity,
+        targetIndex,
+      );
     }
   }
 
-  outputContext.putImageData(result, 0, 0);
+  resultContext.putImageData(result, 0, 0);
   return outputCanvas;
 }
 
-function getFisheyeSourcePoint(x, y, width, height, strength, intensity) {
-  if (strength === 0) {
-    return { x, y };
+function ensureCanvasSize(targetCanvas, width, height) {
+  if (targetCanvas.width !== width) {
+    targetCanvas.width = width;
+  }
+  if (targetCanvas.height !== height) {
+    targetCanvas.height = height;
+  }
+}
+
+function getSourceImageData() {
+  if (sourceImageData) {
+    return sourceImageData;
   }
 
-  const centerX = (width - 1) / 2;
-  const centerY = (height - 1) / 2;
-  const dx = x - centerX;
-  const dy = y - centerY;
-  const lensRadius = Math.min(width, height) / 2;
-  const distance = Math.hypot(dx, dy);
-  const normalized = distance / lensRadius;
-  const sourceRadius = Math.pow(normalized, 1 + intensity) * lensRadius;
-  const scale = distance === 0 ? 0 : sourceRadius / distance;
+  if (!sourceCanvas) {
+    sourceCanvas = document.createElement("canvas");
+    sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
+  }
 
-  return {
-    x: centerX + dx * scale,
-    y: centerY + dy * scale,
-  };
+  ensureCanvasSize(sourceCanvas, previewWidth, previewHeight);
+  sourceContext.drawImage(sourceBitmap, 0, 0, previewWidth, previewHeight);
+  sourceImageData = sourceContext.getImageData(0, 0, previewWidth, previewHeight);
+  return sourceImageData;
+}
+
+function getResultCanvas(width, height) {
+  if (!resultCanvas) {
+    resultCanvas = document.createElement("canvas");
+    resultContext = resultCanvas.getContext("2d", { willReadFrequently: true });
+  }
+
+  ensureCanvasSize(resultCanvas, width, height);
+  return resultCanvas;
+}
+
+function getResultImageData(width, height) {
+  if (!resultImageData || resultImageData.width !== width || resultImageData.height !== height) {
+    resultImageData = resultContext.createImageData(width, height);
+  }
+
+  return resultImageData;
+}
+
+function sampleBilinearPoint(
+  source,
+  target,
+  width,
+  height,
+  crop,
+  x,
+  y,
+  outputWidth,
+  outputHeight,
+  strength,
+  intensity,
+  targetIndex,
+) {
+  let sampleX = x;
+  let sampleY = y;
+
+  if (strength !== 0) {
+    const centerX = (outputWidth - 1) / 2;
+    const centerY = (outputHeight - 1) / 2;
+    const dx = x - centerX;
+    const dy = y - centerY;
+    const lensRadius = Math.min(outputWidth, outputHeight) / 2;
+    const distance = Math.hypot(dx, dy);
+    const normalized = distance / lensRadius;
+    const sourceRadius = Math.pow(normalized, 1 + intensity) * lensRadius;
+    const scale = distance === 0 ? 0 : sourceRadius / distance;
+    sampleX = centerX + dx * scale;
+    sampleY = centerY + dy * scale;
+  }
+
+  const sourceX = crop.x + sampleX;
+  const sourceY = crop.y + sampleY;
+  const x0 = clamp(Math.floor(sourceX), 0, width - 1);
+  const y0 = clamp(Math.floor(sourceY), 0, height - 1);
+  const x1 = clamp(x0 + 1, 0, width - 1);
+  const y1 = clamp(y0 + 1, 0, height - 1);
+  const tx = sourceX - x0;
+  const ty = sourceY - y0;
+
+  const topLeft = (y0 * width + x0) * 4;
+  const topRight = (y0 * width + x1) * 4;
+  const bottomLeft = (y1 * width + x0) * 4;
+  const bottomRight = (y1 * width + x1) * 4;
+
+  for (let channel = 0; channel < 4; channel += 1) {
+    const top = lerp(source[topLeft + channel], source[topRight + channel], tx);
+    const bottom = lerp(source[bottomLeft + channel], source[bottomRight + channel], tx);
+    target[targetIndex + channel] = lerp(top, bottom, ty);
+  }
 }
 
 function isInsideShape(x, y, width, height) {
@@ -476,16 +558,34 @@ function downloadImage() {
   link.click();
 }
 
-function getBackgroundColor(x, y, width, height) {
+function getBackgroundColors() {
   if (background.mode === "solid") {
-    return hexToRgb(background.solid);
+    return {
+      mode: "solid",
+      solid: hexToRgb(background.solid),
+    };
   }
 
-  const start = hexToRgb(background.gradientStart);
-  const end = hexToRgb(background.gradientEnd);
+  return {
+    mode: "gradient",
+    start: hexToRgb(background.gradientStart),
+    end: hexToRgb(background.gradientEnd),
+  };
+}
+
+function fillBackgroundPixel(target, targetIndex, x, y, width, height, colors) {
+  if (colors.mode === "solid") {
+    fillPixel(target, targetIndex, colors.solid);
+    return;
+  }
+
   const horizontal = width <= 1 ? 0 : x / (width - 1);
   const vertical = height <= 1 ? 0 : y / (height - 1);
-  return mixColor(start, end, clamp(horizontal * 0.74 + vertical * 0.26, 0, 1));
+  const amount = clamp(horizontal * 0.74 + vertical * 0.26, 0, 1);
+  target[targetIndex] = Math.round(lerp(colors.start.r, colors.end.r, amount));
+  target[targetIndex + 1] = Math.round(lerp(colors.start.g, colors.end.g, amount));
+  target[targetIndex + 2] = Math.round(lerp(colors.start.b, colors.end.b, amount));
+  target[targetIndex + 3] = 255;
 }
 
 function getCanvasPoint(event) {
@@ -509,26 +609,6 @@ function sanitizeCropRect(rect, boundsWidth = canvas.width, boundsHeight = canva
     width,
     height,
   };
-}
-
-function sampleBilinear(source, target, width, height, x, y, targetIndex) {
-  const x0 = clamp(Math.floor(x), 0, width - 1);
-  const y0 = clamp(Math.floor(y), 0, height - 1);
-  const x1 = clamp(x0 + 1, 0, width - 1);
-  const y1 = clamp(y0 + 1, 0, height - 1);
-  const tx = x - x0;
-  const ty = y - y0;
-
-  const topLeft = (y0 * width + x0) * 4;
-  const topRight = (y0 * width + x1) * 4;
-  const bottomLeft = (y1 * width + x0) * 4;
-  const bottomRight = (y1 * width + x1) * 4;
-
-  for (let channel = 0; channel < 4; channel += 1) {
-    const top = lerp(source[topLeft + channel], source[topRight + channel], tx);
-    const bottom = lerp(source[bottomLeft + channel], source[bottomRight + channel], tx);
-    target[targetIndex + channel] = lerp(top, bottom, ty);
-  }
 }
 
 function fillPixel(target, targetIndex, color) {
@@ -568,14 +648,6 @@ function hexToRgb(hex) {
     r: (value >> 16) & 255,
     g: (value >> 8) & 255,
     b: value & 255,
-  };
-}
-
-function mixColor(start, end, amount) {
-  return {
-    r: Math.round(lerp(start.r, end.r, amount)),
-    g: Math.round(lerp(start.g, end.g, amount)),
-    b: Math.round(lerp(start.b, end.b, amount)),
   };
 }
 
