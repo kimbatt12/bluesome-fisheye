@@ -113,7 +113,13 @@ h1 {
 }
 
 .stage.has-image {
+  width: min(100%, var(--stage-width, 100%));
+  height: auto;
+  min-height: 0;
+  aspect-ratio: var(--stage-aspect, 4 / 5);
+  padding: var(--stage-padding, 28px);
   cursor: default;
+  justify-self: center;
 }
 
 .stage.dragging {
@@ -525,6 +531,11 @@ input[type="color"] {
     grid-row: 1 / 4;
     height: min(78vh, 720px);
     min-height: 620px;
+  }
+
+  .stage.has-image {
+    height: auto;
+    min-height: 0;
   }
 
   .controls,

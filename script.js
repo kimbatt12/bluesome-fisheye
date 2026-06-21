@@ -27,6 +27,7 @@ const gradientEndButtons = document.querySelectorAll("[data-gradient-end-color]"
 const shapeOptionButtons = document.querySelectorAll("[data-crop-shape]");
 
 const minCropSize = 48;
+const stageImagePadding = 28;
 const defaultBackground = {
   mode: "solid",
   solid: "#ffffff",
@@ -254,8 +255,17 @@ function prepareCanvas(width, height) {
   previewWidth = Math.max(1, Math.round(width * scale));
   previewHeight = Math.max(1, Math.round(height * scale));
   ensureCanvasSize(canvas, previewWidth, previewHeight);
+  updateStageSize();
   sourceImageData = null;
   resultImageData = null;
+}
+
+function updateStageSize() {
+  const stageWidth = previewWidth + stageImagePadding * 2;
+  const stageHeight = previewHeight + stageImagePadding * 2;
+  dropZone.style.setProperty("--stage-width", `${stageWidth}px`);
+  dropZone.style.setProperty("--stage-padding", `${stageImagePadding}px`);
+  dropZone.style.setProperty("--stage-aspect", `${stageWidth} / ${stageHeight}`);
 }
 
 function renderLivePreview() {
