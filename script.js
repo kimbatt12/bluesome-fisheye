@@ -87,7 +87,7 @@ dropZone.addEventListener("pointerdown", (event) => {
   }
 
   const point = getCanvasPoint(event);
-  if (!point) {
+  if (!point || !isPointInsideLens(point.x, point.y)) {
     return;
   }
 
@@ -174,23 +174,40 @@ function renderFisheye() {
   const result = context.createImageData(width, height);
   const strength = Number(strengthInput.value) / 100;
   const intensity = 0.18 + strength * 1.22;
-  const centerX = distortionCenter.x * (width - 1);
-  const centerY = distortionCenter.y * (height - 1);
-  const radius = getFarthestCornerDistance(centerX, centerY, width, height);
+  const lensCenterX = (width - 1) / 2;
+  const lensCenterY = (height - 1) / 2;
+  const distortionCenterX = distortionCenter.x * (width - 1);
+  const distortionCenterY = distortionCenter.y * (height - 1);
+  const radius = Math.min(width, height) / 2;
   const backgroundColor = hexToRgb(backgroundColorInput.value);
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      const dx = x - centerX;
-      const dy = y - centerY;
+      const dx = x - lensCenterX;
+      const dy = y - lensCenterY;
       const distance = Math.sqrt(dx * dx + dy * dy);
       const targetIndex = (y * width + x) * 4;
 
+      if (distance > radius) {
+        fillPixel(result.data, targetIndex, getBackgroundColor(x, y, width, height, backgroundColor));
+        continue;
+      }
+
       const normalized = distance / radius;
-      const sourceRadius = Math.pow(normalized, 1 + intensity) * radius;
       const angle = Math.atan2(dy, dx);
-      const sourceX = centerX + Math.cos(angle) * sourceRadius;
-      const sourceY = centerY + Math.sin(angle) * sourceRadius;
+      const directionX = Math.cos(angle);
+      const directionY = Math.sin(angle);
+      const sourceBoundary = getRayToRectangleDistance(
+        distortionCenterX,
+        distortionCenterY,
+        directionX,
+        directionY,
+        width,
+        height,
+      );
+      const sourceRadius = Math.pow(normalized, 1 + intensity) * sourceBoundary;
+      const sourceX = distortionCenterX + directionX * sourceRadius;
+      const sourceY = distortionCenterY + directionY * sourceRadius;
 
       if (sourceX < 0 || sourceY < 0 || sourceX > width - 1 || sourceY > height - 1) {
         fillPixel(result.data, targetIndex, getBackgroundColor(x, y, width, height, backgroundColor));
@@ -204,13 +221,20 @@ function renderFisheye() {
   context.putImageData(result, 0, 0);
 }
 
-function getFarthestCornerDistance(centerX, centerY, width, height) {
-  return Math.max(
-    Math.hypot(centerX, centerY),
-    Math.hypot(width - 1 - centerX, centerY),
-    Math.hypot(centerX, height - 1 - centerY),
-    Math.hypot(width - 1 - centerX, height - 1 - centerY),
-  );
+function getRayToRectangleDistance(originX, originY, directionX, directionY, width, height) {
+  const distances = [];
+
+  if (Math.abs(directionX) > 0.000001) {
+    distances.push((0 - originX) / directionX);
+    distances.push((width - 1 - originX) / directionX);
+  }
+
+  if (Math.abs(directionY) > 0.000001) {
+    distances.push((0 - originY) / directionY);
+    distances.push((height - 1 - originY) / directionY);
+  }
+
+  return Math.min(...distances.filter((distance) => distance > 0));
 }
 
 function sampleBilinear(source, target, width, height, x, y, targetIndex) {
@@ -307,6 +331,14 @@ function getCanvasPoint(event) {
     x: clamp((x / rect.width) * (canvas.width - 1), 0, canvas.width - 1),
     y: clamp((y / rect.height) * (canvas.height - 1), 0, canvas.height - 1),
   };
+}
+
+function isPointInsideLens(x, y) {
+  const centerX = (canvas.width - 1) / 2;
+  const centerY = (canvas.height - 1) / 2;
+  const radius = Math.min(canvas.width, canvas.height) / 2;
+
+  return Math.hypot(x - centerX, y - centerY) <= radius;
 }
 
 function updateFocusPoint() {
