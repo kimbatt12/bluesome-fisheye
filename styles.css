@@ -345,6 +345,11 @@ input[type="color"] {
   background: var(--panel);
 }
 
+.secondary.is-active {
+  background: var(--yellow);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
 .secondary:not(:disabled):hover,
 .icon-button:not(:disabled):hover,
 .primary:hover {
@@ -417,6 +422,10 @@ input[type="color"] {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+.mode-tabs.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .mode-tab {
@@ -541,6 +550,10 @@ input[type="color"] {
   .controls,
   .status {
     grid-column: 1;
+  }
+
+  .actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .modal-backdrop {

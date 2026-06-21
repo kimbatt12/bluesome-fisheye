@@ -4,6 +4,8 @@ const context = canvas.getContext("2d", { willReadFrequently: true });
 const cropBox = document.getElementById("cropBox");
 const shapeButton = document.getElementById("shapeButton");
 const backgroundButton = document.getElementById("backgroundButton");
+const borderButton = document.getElementById("borderButton");
+const previewButton = document.getElementById("previewButton");
 const downloadButton = document.getElementById("downloadButton");
 const resetButton = document.getElementById("resetButton");
 const strengthInput = document.getElementById("strengthInput");
@@ -15,15 +17,26 @@ const backgroundModal = document.getElementById("backgroundModal");
 const closeBackgroundButton = document.getElementById("closeBackgroundButton");
 const shapeModal = document.getElementById("shapeModal");
 const closeShapeButton = document.getElementById("closeShapeButton");
+const borderModal = document.getElementById("borderModal");
+const closeBorderButton = document.getElementById("closeBorderButton");
 const solidPanel = document.getElementById("solidPanel");
 const gradientPanel = document.getElementById("gradientPanel");
+const borderBlurPanel = document.getElementById("borderBlurPanel");
+const borderColorPanel = document.getElementById("borderColorPanel");
 const solidColorInput = document.getElementById("solidColorInput");
 const gradientStartInput = document.getElementById("gradientStartInput");
 const gradientEndInput = document.getElementById("gradientEndInput");
+const borderColorInput = document.getElementById("borderColorInput");
+const borderSizeInput = document.getElementById("borderSizeInput");
+const borderSizeOutput = document.getElementById("borderSizeOutput");
+const borderBlurInput = document.getElementById("borderBlurInput");
+const borderBlurOutput = document.getElementById("borderBlurOutput");
 const modeButtons = document.querySelectorAll("[data-background-mode]");
+const borderModeButtons = document.querySelectorAll("[data-border-mode]");
 const swatchButtons = document.querySelectorAll("[data-solid-color]");
 const gradientStartButtons = document.querySelectorAll("[data-gradient-start-color]");
 const gradientEndButtons = document.querySelectorAll("[data-gradient-end-color]");
+const borderColorButtons = document.querySelectorAll("[data-border-color]");
 const shapeOptionButtons = document.querySelectorAll("[data-crop-shape]");
 
 const minCropSize = 48;
@@ -34,6 +47,12 @@ const defaultBackground = {
   gradientStart: "#ffd02f",
   gradientEnd: "#4262ff",
 };
+const defaultBorderStyle = {
+  mode: "none",
+  color: "#ffffff",
+  size: 14,
+  blur: 50,
+};
 
 let sourceBitmap = null;
 let sourceName = "fisheye-image";
@@ -43,7 +62,9 @@ let previewHeight = 0;
 let cropRect = null;
 let dragState = null;
 let cropShape = "circle";
+let isPreviewMode = false;
 let background = { ...defaultBackground };
+let borderStyle = { ...defaultBorderStyle };
 let sourceCanvas = null;
 let sourceContext = null;
 let sourceImageData = null;
@@ -63,21 +84,33 @@ strengthInput.addEventListener("input", () => {
   renderLivePreview();
 });
 
-shapeButton.addEventListener("click", openShapeModal);
 backgroundButton.addEventListener("click", openBackgroundModal);
+shapeButton.addEventListener("click", openShapeModal);
+borderButton.addEventListener("click", openBorderModal);
+previewButton.addEventListener("click", togglePreviewMode);
 closeBackgroundButton.addEventListener("click", closeBackgroundModal);
 closeShapeButton.addEventListener("click", closeShapeModal);
+closeBorderButton.addEventListener("click", closeBorderModal);
 downloadButton.addEventListener("click", downloadImage);
 resetButton.addEventListener("click", resetToUploadedState);
 window.addEventListener("resize", updateCropBoxPosition);
 
 closeOnBackdropClick(backgroundModal, closeBackgroundModal);
 closeOnBackdropClick(shapeModal, closeShapeModal);
+closeOnBackdropClick(borderModal, closeBorderModal);
 
 modeButtons.forEach((button) => {
   button.addEventListener("click", () => {
     background.mode = button.dataset.backgroundMode;
     updateBackgroundControls();
+    renderLivePreview();
+  });
+});
+
+borderModeButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    borderStyle.mode = button.dataset.borderMode;
+    updateBorderControls();
     renderLivePreview();
   });
 });
@@ -97,6 +130,37 @@ shapeOptionButtons.forEach((button) => {
 bindBackgroundInput(solidColorInput, "solid", "solid");
 bindBackgroundInput(gradientStartInput, "gradientStart", "gradient");
 bindBackgroundInput(gradientEndInput, "gradientEnd", "gradient");
+
+borderColorButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    borderStyle.mode = "color";
+    borderStyle.color = button.dataset.borderColor;
+    borderColorInput.value = borderStyle.color;
+    updateBorderControls();
+    renderLivePreview();
+  });
+});
+
+borderColorInput.addEventListener("input", () => {
+  borderStyle.mode = "color";
+  borderStyle.color = borderColorInput.value;
+  updateBorderControls();
+  renderLivePreview();
+});
+
+borderSizeInput.addEventListener("input", () => {
+  borderStyle.size = Number(borderSizeInput.value);
+  borderSizeOutput.value = borderSizeInput.value;
+  renderLivePreview();
+});
+
+borderBlurInput.addEventListener("input", () => {
+  borderStyle.mode = "blur";
+  borderStyle.blur = Number(borderBlurInput.value);
+  borderBlurOutput.value = borderBlurInput.value;
+  updateBorderControls();
+  renderLivePreview();
+});
 
 ["dragenter", "dragover"].forEach((eventName) => {
   dropZone.addEventListener(eventName, (event) => {
@@ -200,6 +264,8 @@ async function loadImageFile(file) {
     cropBox.classList.add("is-visible");
     shapeButton.disabled = false;
     backgroundButton.disabled = false;
+    borderButton.disabled = false;
+    previewButton.disabled = false;
     downloadButton.disabled = false;
     resetButton.disabled = false;
     renderLivePreview();
@@ -222,6 +288,8 @@ function resetToUploadedState() {
   resetCropToFullImage();
   cropBox.classList.add("is-visible");
   shapeButton.disabled = false;
+  borderButton.disabled = false;
+  previewButton.disabled = false;
   downloadButton.disabled = false;
   renderLivePreview();
   updateCropBoxPosition();
@@ -230,13 +298,22 @@ function resetToUploadedState() {
 
 function resetControlsToDefaults() {
   background = { ...defaultBackground };
+  borderStyle = { ...defaultBorderStyle };
+  isPreviewMode = false;
   strengthInput.value = "0";
   strengthOutput.value = "0";
   cropShape = "circle";
   solidColorInput.value = background.solid;
   gradientStartInput.value = background.gradientStart;
   gradientEndInput.value = background.gradientEnd;
+  borderColorInput.value = borderStyle.color;
+  borderSizeInput.value = String(borderStyle.size);
+  borderSizeOutput.value = String(borderStyle.size);
+  borderBlurInput.value = String(borderStyle.blur);
+  borderBlurOutput.value = String(borderStyle.blur);
   updateBackgroundControls();
+  updateBorderControls();
+  updatePreviewControls();
   updateShapeControls();
 }
 
@@ -255,14 +332,14 @@ function prepareCanvas(width, height) {
   previewWidth = Math.max(1, Math.round(width * scale));
   previewHeight = Math.max(1, Math.round(height * scale));
   ensureCanvasSize(canvas, previewWidth, previewHeight);
-  updateStageSize();
+  updateStageSize(previewWidth, previewHeight);
   sourceImageData = null;
   resultImageData = null;
 }
 
-function updateStageSize() {
-  const stageWidth = previewWidth + stageImagePadding * 2;
-  const stageHeight = previewHeight + stageImagePadding * 2;
+function updateStageSize(contentWidth, contentHeight) {
+  const stageWidth = contentWidth + stageImagePadding * 2;
+  const stageHeight = contentHeight + stageImagePadding * 2;
   dropZone.style.setProperty("--stage-width", `${stageWidth}px`);
   dropZone.style.setProperty("--stage-padding", `${stageImagePadding}px`);
   dropZone.style.setProperty("--stage-aspect", `${stageWidth} / ${stageHeight}`);
@@ -273,10 +350,19 @@ function renderLivePreview() {
     return;
   }
 
-  ensureCanvasSize(canvas, previewWidth, previewHeight);
   const crop = sanitizeCropRect(cropRect, previewWidth, previewHeight);
   const output = createResultCanvas(crop);
 
+  if (isPreviewMode) {
+    ensureCanvasSize(canvas, output.width, output.height);
+    updateStageSize(output.width, output.height);
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(output, 0, 0);
+    return;
+  }
+
+  ensureCanvasSize(canvas, previewWidth, previewHeight);
+  updateStageSize(previewWidth, previewHeight);
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.drawImage(output, crop.x, crop.y);
 }
@@ -319,6 +405,7 @@ function createResultCanvas(crop) {
     }
   }
 
+  applyBorderEffect(targetData, outputWidth, outputHeight);
   resultContext.putImageData(result, 0, 0);
   return outputCanvas;
 }
@@ -443,6 +530,111 @@ function isInsideShape(x, y, width, height) {
   return Math.hypot(x - centerX, y - centerY) <= radius;
 }
 
+function applyBorderEffect(target, width, height) {
+  if (borderStyle.mode === "none") {
+    return;
+  }
+
+  const borderSize = Math.max(1, Math.min(Number(borderStyle.size), Math.min(width, height) / 2));
+
+  if (borderStyle.mode === "color") {
+    applyColorBorder(target, width, height, borderSize, hexToRgb(borderStyle.color));
+    return;
+  }
+
+  applyBlurBorder(target, width, height, borderSize, borderStyle.blur);
+}
+
+function applyColorBorder(target, width, height, borderSize, color) {
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const edgeDistance = getShapeEdgeDistance(x, y, width, height);
+
+      if (edgeDistance >= 0 && edgeDistance <= borderSize) {
+        fillPixel(target, (y * width + x) * 4, color);
+      }
+    }
+  }
+}
+
+function applyBlurBorder(target, width, height, borderSize, blurStrength) {
+  const source = target.slice();
+  const radius = Math.min(12, Math.max(1, Math.round((borderSize * blurStrength) / 200)));
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const edgeDistance = getShapeEdgeDistance(x, y, width, height);
+
+      if (edgeDistance < 0 || edgeDistance > borderSize) {
+        continue;
+      }
+
+      blurPixel(source, target, width, height, x, y, radius);
+    }
+  }
+}
+
+function blurPixel(source, target, width, height, x, y, radius) {
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  let alpha = 0;
+  let samples = 0;
+
+  for (let sampleY = y - radius; sampleY <= y + radius; sampleY += 1) {
+    for (let sampleX = x - radius; sampleX <= x + radius; sampleX += 1) {
+      const clampedX = clamp(sampleX, 0, width - 1);
+      const clampedY = clamp(sampleY, 0, height - 1);
+      const sourceIndex = (clampedY * width + clampedX) * 4;
+      red += source[sourceIndex];
+      green += source[sourceIndex + 1];
+      blue += source[sourceIndex + 2];
+      alpha += source[sourceIndex + 3];
+      samples += 1;
+    }
+  }
+
+  const targetIndex = (y * width + x) * 4;
+  target[targetIndex] = Math.round(red / samples);
+  target[targetIndex + 1] = Math.round(green / samples);
+  target[targetIndex + 2] = Math.round(blue / samples);
+  target[targetIndex + 3] = Math.round(alpha / samples);
+}
+
+function getShapeEdgeDistance(x, y, width, height) {
+  if (cropShape === "square") {
+    return Math.min(x, y, width - 1 - x, height - 1 - y);
+  }
+
+  if (cropShape === "rounded") {
+    return getRoundedRectEdgeDistance(x, y, width, height);
+  }
+
+  const centerX = (width - 1) / 2;
+  const centerY = (height - 1) / 2;
+  const radius = Math.min(width, height) / 2;
+  return radius - Math.hypot(x - centerX, y - centerY);
+}
+
+function getRoundedRectEdgeDistance(x, y, width, height) {
+  const radius = Math.min(width, height) * 0.18;
+  const left = radius;
+  const right = width - radius;
+  const top = radius;
+  const bottom = height - radius;
+
+  if (x >= left && x <= right) {
+    return Math.min(y, height - 1 - y);
+  }
+  if (y >= top && y <= bottom) {
+    return Math.min(x, width - 1 - x);
+  }
+
+  const cornerX = x < left ? left : right;
+  const cornerY = y < top ? top : bottom;
+  return radius - Math.hypot(x - cornerX, y - cornerY);
+}
+
 function updateCropFromDrag(point) {
   const dx = point.x - dragState.startPoint.x;
   const dy = point.y - dragState.startPoint.y;
@@ -527,6 +719,25 @@ function closeShapeModal() {
   setModalOpen(shapeModal, false);
 }
 
+function openBorderModal() {
+  setModalOpen(borderModal, true);
+}
+
+function closeBorderModal() {
+  setModalOpen(borderModal, false);
+}
+
+function togglePreviewMode() {
+  if (!sourceBitmap) {
+    return;
+  }
+
+  isPreviewMode = !isPreviewMode;
+  updatePreviewControls();
+  renderLivePreview();
+  updateCropBoxPosition();
+}
+
 function setModalOpen(modal, isOpen) {
   modal.classList.toggle("is-open", isOpen);
   modal.setAttribute("aria-hidden", String(!isOpen));
@@ -545,6 +756,19 @@ function updateBackgroundControls() {
 
 function updateShapeControls() {
   updateSelectedButtons(shapeOptionButtons, "cropShape", cropShape);
+}
+
+function updateBorderControls() {
+  updateSelectedButtons(borderModeButtons, "borderMode", borderStyle.mode);
+  updateSelectedButtons(borderColorButtons, "borderColor", borderStyle.color);
+  borderBlurPanel.classList.toggle("is-hidden", borderStyle.mode !== "blur");
+  borderColorPanel.classList.toggle("is-hidden", borderStyle.mode !== "color");
+}
+
+function updatePreviewControls() {
+  cropBox.classList.toggle("is-visible", !isPreviewMode);
+  previewButton.classList.toggle("is-active", isPreviewMode);
+  previewButton.setAttribute("aria-pressed", String(isPreviewMode));
 }
 
 function updateSelectedButtons(buttons, datasetKey, selectedValue) {
