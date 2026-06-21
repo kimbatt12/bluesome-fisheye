@@ -27,6 +27,12 @@ const gradientEndButtons = document.querySelectorAll("[data-gradient-end-color]"
 const shapeOptionButtons = document.querySelectorAll("[data-crop-shape]");
 
 const minCropSize = 48;
+const defaultBackground = {
+  mode: "solid",
+  solid: "#ffffff",
+  gradientStart: "#ffd02f",
+  gradientEnd: "#4262ff",
+};
 
 let sourceBitmap = null;
 let sourceName = "fisheye-image";
@@ -36,12 +42,7 @@ let previewHeight = 0;
 let cropRect = null;
 let dragState = null;
 let cropShape = "circle";
-let background = {
-  mode: "solid",
-  solid: "#ffffff",
-  gradientStart: "#ffd02f",
-  gradientEnd: "#4262ff",
-};
+let background = { ...defaultBackground };
 
 fileInput.addEventListener("change", () => {
   const [file] = fileInput.files;
@@ -63,17 +64,8 @@ downloadButton.addEventListener("click", downloadImage);
 resetButton.addEventListener("click", resetToUploadedState);
 window.addEventListener("resize", updateCropBoxPosition);
 
-backgroundModal.addEventListener("click", (event) => {
-  if (event.target === backgroundModal) {
-    closeBackgroundModal();
-  }
-});
-
-shapeModal.addEventListener("click", (event) => {
-  if (event.target === shapeModal) {
-    closeShapeModal();
-  }
-});
+closeOnBackdropClick(backgroundModal, closeBackgroundModal);
+closeOnBackdropClick(shapeModal, closeShapeModal);
 
 modeButtons.forEach((button) => {
   button.addEventListener("click", () => {
@@ -83,35 +75,9 @@ modeButtons.forEach((button) => {
   });
 });
 
-swatchButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    background.mode = "solid";
-    background.solid = button.dataset.solidColor;
-    solidColorInput.value = background.solid;
-    updateBackgroundControls();
-    renderLivePreview();
-  });
-});
-
-gradientStartButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    background.mode = "gradient";
-    background.gradientStart = button.dataset.gradientStartColor;
-    gradientStartInput.value = background.gradientStart;
-    updateBackgroundControls();
-    renderLivePreview();
-  });
-});
-
-gradientEndButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    background.mode = "gradient";
-    background.gradientEnd = button.dataset.gradientEndColor;
-    gradientEndInput.value = background.gradientEnd;
-    updateBackgroundControls();
-    renderLivePreview();
-  });
-});
+bindBackgroundChoice(swatchButtons, "solid", "solidColor", solidColorInput, "solid");
+bindBackgroundChoice(gradientStartButtons, "gradientStart", "gradientStartColor", gradientStartInput, "gradient");
+bindBackgroundChoice(gradientEndButtons, "gradientEnd", "gradientEndColor", gradientEndInput, "gradient");
 
 shapeOptionButtons.forEach((button) => {
   button.addEventListener("click", () => {
@@ -121,26 +87,9 @@ shapeOptionButtons.forEach((button) => {
   });
 });
 
-solidColorInput.addEventListener("input", () => {
-  background.mode = "solid";
-  background.solid = solidColorInput.value;
-  updateBackgroundControls();
-  renderLivePreview();
-});
-
-gradientStartInput.addEventListener("input", () => {
-  background.mode = "gradient";
-  background.gradientStart = gradientStartInput.value;
-  updateBackgroundControls();
-  renderLivePreview();
-});
-
-gradientEndInput.addEventListener("input", () => {
-  background.mode = "gradient";
-  background.gradientEnd = gradientEndInput.value;
-  updateBackgroundControls();
-  renderLivePreview();
-});
+bindBackgroundInput(solidColorInput, "solid", "solid");
+bindBackgroundInput(gradientStartInput, "gradientStart", "gradient");
+bindBackgroundInput(gradientEndInput, "gradientEnd", "gradient");
 
 ["dragenter", "dragover"].forEach((eventName) => {
   dropZone.addEventListener(eventName, (event) => {
@@ -195,6 +144,35 @@ cropBox.addEventListener("pointermove", (event) => {
 cropBox.addEventListener("pointerup", endCropDrag);
 cropBox.addEventListener("pointercancel", endCropDrag);
 
+function closeOnBackdropClick(modal, closeModal) {
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) {
+      closeModal();
+    }
+  });
+}
+
+function bindBackgroundChoice(buttons, backgroundKey, datasetKey, input, mode) {
+  buttons.forEach((button) => {
+    button.addEventListener("click", () => {
+      background.mode = mode;
+      background[backgroundKey] = button.dataset[datasetKey];
+      input.value = background[backgroundKey];
+      updateBackgroundControls();
+      renderLivePreview();
+    });
+  });
+}
+
+function bindBackgroundInput(input, backgroundKey, mode) {
+  input.addEventListener("input", () => {
+    background.mode = mode;
+    background[backgroundKey] = input.value;
+    updateBackgroundControls();
+    renderLivePreview();
+  });
+}
+
 async function loadImageFile(file) {
   if (!isImageFile(file)) {
     setStatus("이미지 파일을 선택해주세요.");
@@ -244,12 +222,7 @@ function resetToUploadedState() {
 }
 
 function resetControlsToDefaults() {
-  background = {
-    mode: "solid",
-    solid: "#ffffff",
-    gradientStart: "#ffd02f",
-    gradientEnd: "#4262ff",
-  };
+  background = { ...defaultBackground };
   strengthInput.value = "0";
   strengthOutput.value = "0";
   cropShape = "circle";
@@ -447,48 +420,44 @@ function endCropDrag(event) {
 }
 
 function openBackgroundModal() {
-  backgroundModal.classList.add("is-open");
-  backgroundModal.setAttribute("aria-hidden", "false");
+  setModalOpen(backgroundModal, true);
 }
 
 function closeBackgroundModal() {
-  backgroundModal.classList.remove("is-open");
-  backgroundModal.setAttribute("aria-hidden", "true");
+  setModalOpen(backgroundModal, false);
 }
 
 function openShapeModal() {
-  shapeModal.classList.add("is-open");
-  shapeModal.setAttribute("aria-hidden", "false");
+  setModalOpen(shapeModal, true);
 }
 
 function closeShapeModal() {
-  shapeModal.classList.remove("is-open");
-  shapeModal.setAttribute("aria-hidden", "true");
+  setModalOpen(shapeModal, false);
+}
+
+function setModalOpen(modal, isOpen) {
+  modal.classList.toggle("is-open", isOpen);
+  modal.setAttribute("aria-hidden", String(!isOpen));
 }
 
 function updateBackgroundControls() {
-  modeButtons.forEach((button) => {
-    button.classList.toggle("is-selected", button.dataset.backgroundMode === background.mode);
-  });
+  updateSelectedButtons(modeButtons, "backgroundMode", background.mode);
 
   solidPanel.classList.toggle("is-hidden", background.mode !== "solid");
   gradientPanel.classList.toggle("is-hidden", background.mode !== "gradient");
-  swatchButtons.forEach((button) => {
-    button.classList.toggle("is-selected", button.dataset.solidColor === background.solid);
-  });
 
-  gradientStartButtons.forEach((button) => {
-    button.classList.toggle("is-selected", button.dataset.gradientStartColor === background.gradientStart);
-  });
-
-  gradientEndButtons.forEach((button) => {
-    button.classList.toggle("is-selected", button.dataset.gradientEndColor === background.gradientEnd);
-  });
+  updateSelectedButtons(swatchButtons, "solidColor", background.solid);
+  updateSelectedButtons(gradientStartButtons, "gradientStartColor", background.gradientStart);
+  updateSelectedButtons(gradientEndButtons, "gradientEndColor", background.gradientEnd);
 }
 
 function updateShapeControls() {
-  shapeOptionButtons.forEach((button) => {
-    button.classList.toggle("is-selected", button.dataset.cropShape === cropShape);
+  updateSelectedButtons(shapeOptionButtons, "cropShape", cropShape);
+}
+
+function updateSelectedButtons(buttons, datasetKey, selectedValue) {
+  buttons.forEach((button) => {
+    button.classList.toggle("is-selected", button.dataset[datasetKey] === selectedValue);
   });
 }
 
