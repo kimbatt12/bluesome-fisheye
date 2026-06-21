@@ -38,6 +38,12 @@ const gradientStartButtons = document.querySelectorAll("[data-gradient-start-col
 const gradientEndButtons = document.querySelectorAll("[data-gradient-end-color]");
 const borderColorButtons = document.querySelectorAll("[data-border-color]");
 const shapeOptionButtons = document.querySelectorAll("[data-crop-shape]");
+const imageActionButtons = [shapeButton, backgroundButton, borderButton, previewButton, downloadButton, resetButton];
+const modalControls = [
+  { openButton: backgroundButton, closeButton: closeBackgroundButton, modal: backgroundModal },
+  { openButton: shapeButton, closeButton: closeShapeButton, modal: shapeModal },
+  { openButton: borderButton, closeButton: closeBorderButton, modal: borderModal },
+];
 
 const minCropSize = 48;
 const stageImagePadding = 28;
@@ -84,20 +90,16 @@ strengthInput.addEventListener("input", () => {
   renderLivePreview();
 });
 
-backgroundButton.addEventListener("click", openBackgroundModal);
-shapeButton.addEventListener("click", openShapeModal);
-borderButton.addEventListener("click", openBorderModal);
 previewButton.addEventListener("click", togglePreviewMode);
-closeBackgroundButton.addEventListener("click", closeBackgroundModal);
-closeShapeButton.addEventListener("click", closeShapeModal);
-closeBorderButton.addEventListener("click", closeBorderModal);
 downloadButton.addEventListener("click", downloadImage);
 resetButton.addEventListener("click", resetToUploadedState);
 window.addEventListener("resize", updateCropBoxPosition);
 
-closeOnBackdropClick(backgroundModal, closeBackgroundModal);
-closeOnBackdropClick(shapeModal, closeShapeModal);
-closeOnBackdropClick(borderModal, closeBorderModal);
+modalControls.forEach(({ openButton, closeButton, modal }) => {
+  openButton.addEventListener("click", () => setModalOpen(modal, true));
+  closeButton.addEventListener("click", () => setModalOpen(modal, false));
+  closeOnBackdropClick(modal, () => setModalOpen(modal, false));
+});
 
 modeButtons.forEach((button) => {
   button.addEventListener("click", () => {
@@ -262,12 +264,7 @@ async function loadImageFile(file) {
     emptyState.classList.add("is-hidden");
     dropZone.classList.add("has-image");
     cropBox.classList.add("is-visible");
-    shapeButton.disabled = false;
-    backgroundButton.disabled = false;
-    borderButton.disabled = false;
-    previewButton.disabled = false;
-    downloadButton.disabled = false;
-    resetButton.disabled = false;
+    setImageActionButtonsDisabled(false);
     renderLivePreview();
     updateCropBoxPosition();
     setStatus(`${file.name} 업로드 완료`);
@@ -287,10 +284,7 @@ function resetToUploadedState() {
   resetControlsToDefaults();
   resetCropToFullImage();
   cropBox.classList.add("is-visible");
-  shapeButton.disabled = false;
-  borderButton.disabled = false;
-  previewButton.disabled = false;
-  downloadButton.disabled = false;
+  setImageActionButtonsDisabled(false);
   renderLivePreview();
   updateCropBoxPosition();
   setStatus("업로드 초기 상태로 되돌림");
@@ -558,8 +552,8 @@ function applyColorBorder(target, width, height, borderSize, color) {
 }
 
 function applyBlurBorder(target, width, height, borderSize, blurStrength) {
-  const source = target.slice();
   const radius = Math.min(12, Math.max(1, Math.round((borderSize * blurStrength) / 200)));
+  const integral = createClampedIntegralImage(target, width, height, radius);
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
@@ -569,36 +563,65 @@ function applyBlurBorder(target, width, height, borderSize, blurStrength) {
         continue;
       }
 
-      blurPixel(source, target, width, height, x, y, radius);
+      blurPixel(integral, target, width, height, x, y, radius);
     }
   }
 }
 
-function blurPixel(source, target, width, height, x, y, radius) {
-  let red = 0;
-  let green = 0;
-  let blue = 0;
-  let alpha = 0;
-  let samples = 0;
+function createClampedIntegralImage(source, width, height, radius) {
+  const paddedWidth = width + radius * 2;
+  const paddedHeight = height + radius * 2;
+  const integralWidth = paddedWidth + 1;
+  const integral = new Uint32Array(integralWidth * (paddedHeight + 1) * 4);
 
-  for (let sampleY = y - radius; sampleY <= y + radius; sampleY += 1) {
-    for (let sampleX = x - radius; sampleX <= x + radius; sampleX += 1) {
-      const clampedX = clamp(sampleX, 0, width - 1);
-      const clampedY = clamp(sampleY, 0, height - 1);
-      const sourceIndex = (clampedY * width + clampedX) * 4;
-      red += source[sourceIndex];
-      green += source[sourceIndex + 1];
-      blue += source[sourceIndex + 2];
-      alpha += source[sourceIndex + 3];
-      samples += 1;
+  for (let y = 1; y <= paddedHeight; y += 1) {
+    let rowRed = 0;
+    let rowGreen = 0;
+    let rowBlue = 0;
+    let rowAlpha = 0;
+    const sourceY = clamp(y - radius - 1, 0, height - 1);
+
+    for (let x = 1; x <= paddedWidth; x += 1) {
+      const sourceX = clamp(x - radius - 1, 0, width - 1);
+      const sourceIndex = (sourceY * width + sourceX) * 4;
+      rowRed += source[sourceIndex];
+      rowGreen += source[sourceIndex + 1];
+      rowBlue += source[sourceIndex + 2];
+      rowAlpha += source[sourceIndex + 3];
+
+      const integralIndex = (y * integralWidth + x) * 4;
+      const previousRowIndex = ((y - 1) * integralWidth + x) * 4;
+      integral[integralIndex] = integral[previousRowIndex] + rowRed;
+      integral[integralIndex + 1] = integral[previousRowIndex + 1] + rowGreen;
+      integral[integralIndex + 2] = integral[previousRowIndex + 2] + rowBlue;
+      integral[integralIndex + 3] = integral[previousRowIndex + 3] + rowAlpha;
     }
   }
 
+  return integral;
+}
+
+function blurPixel(integral, target, width, height, x, y, radius) {
+  const integralWidth = width + radius * 2 + 1;
+  const left = x;
+  const right = x + radius * 2;
+  const top = y;
+  const bottom = y + radius * 2;
+  const samples = (radius * 2 + 1) ** 2;
+  const topLeft = (top * integralWidth + left) * 4;
+  const topRight = (top * integralWidth + right + 1) * 4;
+  const bottomLeft = ((bottom + 1) * integralWidth + left) * 4;
+  const bottomRight = ((bottom + 1) * integralWidth + right + 1) * 4;
   const targetIndex = (y * width + x) * 4;
-  target[targetIndex] = Math.round(red / samples);
-  target[targetIndex + 1] = Math.round(green / samples);
-  target[targetIndex + 2] = Math.round(blue / samples);
-  target[targetIndex + 3] = Math.round(alpha / samples);
+
+  target[targetIndex] = Math.round(getIntegralSum(integral, topLeft, topRight, bottomLeft, bottomRight, 0) / samples);
+  target[targetIndex + 1] = Math.round(getIntegralSum(integral, topLeft, topRight, bottomLeft, bottomRight, 1) / samples);
+  target[targetIndex + 2] = Math.round(getIntegralSum(integral, topLeft, topRight, bottomLeft, bottomRight, 2) / samples);
+  target[targetIndex + 3] = Math.round(getIntegralSum(integral, topLeft, topRight, bottomLeft, bottomRight, 3) / samples);
+}
+
+function getIntegralSum(integral, topLeft, topRight, bottomLeft, bottomRight, channel) {
+  return integral[bottomRight + channel] - integral[bottomLeft + channel] - integral[topRight + channel] + integral[topLeft + channel];
 }
 
 function getShapeEdgeDistance(x, y, width, height) {
@@ -703,30 +726,6 @@ function endCropDrag(event) {
   dragState = null;
 }
 
-function openBackgroundModal() {
-  setModalOpen(backgroundModal, true);
-}
-
-function closeBackgroundModal() {
-  setModalOpen(backgroundModal, false);
-}
-
-function openShapeModal() {
-  setModalOpen(shapeModal, true);
-}
-
-function closeShapeModal() {
-  setModalOpen(shapeModal, false);
-}
-
-function openBorderModal() {
-  setModalOpen(borderModal, true);
-}
-
-function closeBorderModal() {
-  setModalOpen(borderModal, false);
-}
-
 function togglePreviewMode() {
   if (!sourceBitmap) {
     return;
@@ -741,6 +740,12 @@ function togglePreviewMode() {
 function setModalOpen(modal, isOpen) {
   modal.classList.toggle("is-open", isOpen);
   modal.setAttribute("aria-hidden", String(!isOpen));
+}
+
+function setImageActionButtonsDisabled(isDisabled) {
+  imageActionButtons.forEach((button) => {
+    button.disabled = isDisabled;
+  });
 }
 
 function updateBackgroundControls() {
