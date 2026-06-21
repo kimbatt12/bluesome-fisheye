@@ -113,7 +113,7 @@ async function loadImageFile(file) {
   try {
     sourceBitmap = await decodeImage(file);
     prepareCanvas(sourceBitmap.width, sourceBitmap.height);
-    distortionCenter = { x: 0.5, y: 0.5 };
+    resetControlsToUploadDefaults();
     renderFisheye();
     dropZone.classList.add("has-image");
     emptyState.classList.add("is-hidden");
@@ -173,7 +173,7 @@ function renderFisheye() {
   const source = offscreenContext.getImageData(0, 0, width, height);
   const result = context.createImageData(width, height);
   const strength = Number(strengthInput.value) / 100;
-  const intensity = 0.18 + strength * 1.22;
+  const intensity = strength * 1.4;
   const lensCenterX = (width - 1) / 2;
   const lensCenterY = (height - 1) / 2;
   const distortionCenterX = distortionCenter.x * (width - 1);
@@ -190,6 +190,11 @@ function renderFisheye() {
 
       if (distance > radius) {
         fillPixel(result.data, targetIndex, getBackgroundColor(x, y, width, height, backgroundColor));
+        continue;
+      }
+
+      if (strength === 0) {
+        sampleBilinear(source.data, result.data, width, height, x, y, targetIndex);
         continue;
       }
 
@@ -234,7 +239,8 @@ function getRayToRectangleDistance(originX, originY, directionX, directionY, wid
     distances.push((height - 1 - originY) / directionY);
   }
 
-  return Math.min(...distances.filter((distance) => distance > 0));
+  const validDistances = distances.filter((distance) => distance >= 0);
+  return validDistances.length > 0 ? Math.min(...validDistances) : 0;
 }
 
 function sampleBilinear(source, target, width, height, x, y, targetIndex) {
@@ -356,11 +362,15 @@ function updateFocusPoint() {
 }
 
 function resetWorkspace() {
+  if (sourceBitmap) {
+    resetControlsToUploadDefaults();
+    renderFisheye();
+    updateFocusPoint();
+    setStatus("업로드 초기 상태로 되돌림");
+    return;
+  }
+
   sourceBitmap = null;
-  distortionCenter = { x: 0.5, y: 0.5 };
-  backgroundPreset = "white";
-  backgroundColorInput.value = "#ffffff";
-  updatePresetButtons();
   fileInput.value = "";
   context.clearRect(0, 0, canvas.width, canvas.height);
   canvas.removeAttribute("width");
@@ -373,6 +383,15 @@ function resetWorkspace() {
   downloadButton.disabled = true;
   resetButton.disabled = true;
   setStatus("");
+}
+
+function resetControlsToUploadDefaults() {
+  distortionCenter = { x: 0.5, y: 0.5 };
+  backgroundPreset = "white";
+  backgroundColorInput.value = "#ffffff";
+  strengthInput.value = "0";
+  strengthOutput.value = "0";
+  updatePresetButtons();
 }
 
 function setStatus(message) {
