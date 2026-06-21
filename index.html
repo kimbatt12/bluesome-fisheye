@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fisheye Studio</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace" aria-label="Fisheye image converter">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Fisheye Studio</p>
+            <h1>사진을 둥글게 휘게</h1>
+          </div>
+          <button class="icon-button" id="resetButton" type="button" aria-label="초기화" disabled>
+            <span aria-hidden="true">↺</span>
+          </button>
+        </header>
+
+        <div class="stage" id="dropZone">
+          <canvas id="previewCanvas" aria-label="변환 미리보기"></canvas>
+          <button
+            class="focus-point"
+            id="focusPoint"
+            type="button"
+            aria-label="왜곡 기준점"
+            disabled
+          ></button>
+          <div class="empty-state" id="emptyState">
+            <div class="lens-mark" aria-hidden="true"></div>
+            <strong>이미지를 업로드하세요</strong>
+          </div>
+        </div>
+
+        <section class="controls" aria-label="변환 설정">
+          <label class="range-control">
+            <span>굴곡</span>
+            <input id="strengthInput" type="range" min="0" max="100" value="64" />
+            <output id="strengthOutput" for="strengthInput">64</output>
+          </label>
+
+          <label class="color-control">
+            <span>배경</span>
+            <input id="backgroundColorInput" type="color" value="#ffffff" />
+          </label>
+
+          <div class="preset-control" aria-label="배경 프리셋">
+            <span>프리셋</span>
+            <div class="preset-options">
+              <button class="preset-button" type="button" data-background-preset="black">
+                검정
+              </button>
+              <button
+                class="preset-button is-selected"
+                type="button"
+                data-background-preset="white"
+              >
+                하양
+              </button>
+              <button class="preset-button gradient" type="button" data-background-preset="gradient">
+                그라데이션
+              </button>
+            </div>
+          </div>
+
+          <div class="actions">
+            <label class="button primary" for="fileInput">
+              <span aria-hidden="true">↑</span>
+              업로드
+            </label>
+            <button class="button secondary" id="downloadButton" type="button" disabled>
+              <span aria-hidden="true">↓</span>
+              다운로드
+            </button>
+          </div>
+        </section>
+
+        <p class="status" id="statusText" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <input
+      id="fileInput"
+      class="visually-hidden"
+      type="file"
+      accept="image/*,.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,.avif,.heic,.heif,.tif,.tiff"
+    />
+
+    <script src="script.js"></script>
+  </body>
+</html>
