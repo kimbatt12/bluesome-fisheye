@@ -1,22 +1,47 @@
 const fileInput = document.getElementById("fileInput");
 const canvas = document.getElementById("previewCanvas");
 const context = canvas.getContext("2d", { willReadFrequently: true });
+const cropBox = document.getElementById("cropBox");
+const shapeButton = document.getElementById("shapeButton");
+const backgroundButton = document.getElementById("backgroundButton");
 const downloadButton = document.getElementById("downloadButton");
 const resetButton = document.getElementById("resetButton");
 const strengthInput = document.getElementById("strengthInput");
 const strengthOutput = document.getElementById("strengthOutput");
-const backgroundColorInput = document.getElementById("backgroundColorInput");
-const presetButtons = document.querySelectorAll("[data-background-preset]");
 const emptyState = document.getElementById("emptyState");
-const focusPoint = document.getElementById("focusPoint");
 const statusText = document.getElementById("statusText");
 const dropZone = document.getElementById("dropZone");
+const backgroundModal = document.getElementById("backgroundModal");
+const closeBackgroundButton = document.getElementById("closeBackgroundButton");
+const shapeModal = document.getElementById("shapeModal");
+const closeShapeButton = document.getElementById("closeShapeButton");
+const solidPanel = document.getElementById("solidPanel");
+const gradientPanel = document.getElementById("gradientPanel");
+const solidColorInput = document.getElementById("solidColorInput");
+const gradientStartInput = document.getElementById("gradientStartInput");
+const gradientEndInput = document.getElementById("gradientEndInput");
+const modeButtons = document.querySelectorAll("[data-background-mode]");
+const swatchButtons = document.querySelectorAll("[data-solid-color]");
+const gradientStartButtons = document.querySelectorAll("[data-gradient-start-color]");
+const gradientEndButtons = document.querySelectorAll("[data-gradient-end-color]");
+const shapeOptionButtons = document.querySelectorAll("[data-crop-shape]");
+
+const minCropSize = 48;
 
 let sourceBitmap = null;
 let sourceName = "fisheye-image";
 let outputType = "image/png";
-let distortionCenter = { x: 0.5, y: 0.5 };
-let backgroundPreset = "white";
+let previewWidth = 0;
+let previewHeight = 0;
+let cropRect = null;
+let dragState = null;
+let cropShape = "circle";
+let background = {
+  mode: "solid",
+  solid: "#ffffff",
+  gradientStart: "#ffd02f",
+  gradientEnd: "#4262ff",
+};
 
 fileInput.addEventListener("change", () => {
   const [file] = fileInput.files;
@@ -27,38 +52,95 @@ fileInput.addEventListener("change", () => {
 
 strengthInput.addEventListener("input", () => {
   strengthOutput.value = strengthInput.value;
-  if (sourceBitmap) {
-    renderFisheye();
+  renderLivePreview();
+});
+
+shapeButton.addEventListener("click", openShapeModal);
+backgroundButton.addEventListener("click", openBackgroundModal);
+closeBackgroundButton.addEventListener("click", closeBackgroundModal);
+closeShapeButton.addEventListener("click", closeShapeModal);
+downloadButton.addEventListener("click", downloadImage);
+resetButton.addEventListener("click", resetToUploadedState);
+window.addEventListener("resize", updateCropBoxPosition);
+
+backgroundModal.addEventListener("click", (event) => {
+  if (event.target === backgroundModal) {
+    closeBackgroundModal();
   }
 });
 
-backgroundColorInput.addEventListener("input", () => {
-  backgroundPreset = "custom";
-  updatePresetButtons();
-  if (sourceBitmap) {
-    renderFisheye();
+shapeModal.addEventListener("click", (event) => {
+  if (event.target === shapeModal) {
+    closeShapeModal();
   }
 });
 
-presetButtons.forEach((button) => {
+modeButtons.forEach((button) => {
   button.addEventListener("click", () => {
-    backgroundPreset = button.dataset.backgroundPreset;
-    if (backgroundPreset === "black") {
-      backgroundColorInput.value = "#000000";
-    }
-    if (backgroundPreset === "white") {
-      backgroundColorInput.value = "#ffffff";
-    }
-    updatePresetButtons();
-    if (sourceBitmap) {
-      renderFisheye();
-    }
+    background.mode = button.dataset.backgroundMode;
+    updateBackgroundControls();
+    renderLivePreview();
   });
 });
 
-downloadButton.addEventListener("click", downloadImage);
-resetButton.addEventListener("click", resetWorkspace);
-window.addEventListener("resize", updateFocusPoint);
+swatchButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    background.mode = "solid";
+    background.solid = button.dataset.solidColor;
+    solidColorInput.value = background.solid;
+    updateBackgroundControls();
+    renderLivePreview();
+  });
+});
+
+gradientStartButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    background.mode = "gradient";
+    background.gradientStart = button.dataset.gradientStartColor;
+    gradientStartInput.value = background.gradientStart;
+    updateBackgroundControls();
+    renderLivePreview();
+  });
+});
+
+gradientEndButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    background.mode = "gradient";
+    background.gradientEnd = button.dataset.gradientEndColor;
+    gradientEndInput.value = background.gradientEnd;
+    updateBackgroundControls();
+    renderLivePreview();
+  });
+});
+
+shapeOptionButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    cropShape = button.dataset.cropShape;
+    updateShapeControls();
+    renderLivePreview();
+  });
+});
+
+solidColorInput.addEventListener("input", () => {
+  background.mode = "solid";
+  background.solid = solidColorInput.value;
+  updateBackgroundControls();
+  renderLivePreview();
+});
+
+gradientStartInput.addEventListener("input", () => {
+  background.mode = "gradient";
+  background.gradientStart = gradientStartInput.value;
+  updateBackgroundControls();
+  renderLivePreview();
+});
+
+gradientEndInput.addEventListener("input", () => {
+  background.mode = "gradient";
+  background.gradientEnd = gradientEndInput.value;
+  updateBackgroundControls();
+  renderLivePreview();
+});
 
 ["dragenter", "dragover"].forEach((eventName) => {
   dropZone.addEventListener(eventName, (event) => {
@@ -81,24 +163,37 @@ dropZone.addEventListener("drop", (event) => {
   }
 });
 
-dropZone.addEventListener("pointerdown", (event) => {
-  if (!sourceBitmap || event.target === focusPoint) {
+cropBox.addEventListener("pointerdown", (event) => {
+  const handle = event.target.dataset.cropHandle;
+  if (!handle || !cropRect) {
+    return;
+  }
+
+  event.preventDefault();
+  event.target.setPointerCapture(event.pointerId);
+
+  const point = getCanvasPoint(event);
+  dragState = {
+    handle,
+    pointerId: event.pointerId,
+    startPoint: point,
+    startRect: { ...cropRect },
+  };
+});
+
+cropBox.addEventListener("pointermove", (event) => {
+  if (!dragState || event.pointerId !== dragState.pointerId) {
     return;
   }
 
   const point = getCanvasPoint(event);
-  if (!point || !isPointInsideLens(point.x, point.y)) {
-    return;
-  }
-
-  distortionCenter = {
-    x: point.x / (canvas.width - 1),
-    y: point.y / (canvas.height - 1),
-  };
-  updateFocusPoint();
-  renderFisheye();
-  setStatus("왜곡 기준점 변경 완료");
+  updateCropFromDrag(point);
+  renderLivePreview();
+  updateCropBoxPosition();
 });
+
+cropBox.addEventListener("pointerup", endCropDrag);
+cropBox.addEventListener("pointercancel", endCropDrag);
 
 async function loadImageFile(file) {
   if (!isImageFile(file)) {
@@ -106,141 +201,345 @@ async function loadImageFile(file) {
     return;
   }
 
-  setStatus("변환 중...");
+  setStatus("업로드 중...");
   sourceName = file.name.replace(/\.[^.]+$/, "") || "fisheye-image";
   outputType = file.type === "image/png" || file.type === "image/webp" ? file.type : "image/png";
 
   try {
     sourceBitmap = await decodeImage(file);
     prepareCanvas(sourceBitmap.width, sourceBitmap.height);
-    resetControlsToUploadDefaults();
-    renderFisheye();
-    dropZone.classList.add("has-image");
+    resetControlsToDefaults();
+    resetCropToFullImage();
     emptyState.classList.add("is-hidden");
-    focusPoint.disabled = false;
-    focusPoint.classList.add("is-visible");
-    updateFocusPoint();
+    dropZone.classList.add("has-image");
+    cropBox.classList.add("is-visible");
+    shapeButton.disabled = false;
+    backgroundButton.disabled = false;
     downloadButton.disabled = false;
     resetButton.disabled = false;
-    setStatus(`${file.name} 변환 완료`);
+    renderLivePreview();
+    updateCropBoxPosition();
+    setStatus(`${file.name} 업로드 완료`);
   } catch (error) {
     console.error(error);
     setStatus("이 브라우저에서 해당 이미지 포맷을 읽을 수 없습니다.");
   }
 }
 
-function isImageFile(file) {
-  const imageExtensions = /\.(avif|bmp|gif|heic|heif|jpeg|jpg|png|svg|tif|tiff|webp)$/i;
-  return file.type.startsWith("image/") || imageExtensions.test(file.name);
+function resetToUploadedState() {
+  if (!sourceBitmap) {
+    return;
+  }
+
+  canvas.width = previewWidth;
+  canvas.height = previewHeight;
+  resetControlsToDefaults();
+  resetCropToFullImage();
+  cropBox.classList.add("is-visible");
+  shapeButton.disabled = false;
+  downloadButton.disabled = false;
+  renderLivePreview();
+  updateCropBoxPosition();
+  setStatus("업로드 초기 상태로 되돌림");
 }
 
-async function decodeImage(file) {
-  if ("createImageBitmap" in window) {
-    return createImageBitmap(file, { imageOrientation: "from-image" });
-  }
+function resetControlsToDefaults() {
+  background = {
+    mode: "solid",
+    solid: "#ffffff",
+    gradientStart: "#ffd02f",
+    gradientEnd: "#4262ff",
+  };
+  strengthInput.value = "0";
+  strengthOutput.value = "0";
+  cropShape = "circle";
+  solidColorInput.value = background.solid;
+  gradientStartInput.value = background.gradientStart;
+  gradientEndInput.value = background.gradientEnd;
+  updateBackgroundControls();
+  updateShapeControls();
+}
 
-  const imageUrl = URL.createObjectURL(file);
-  try {
-    const image = await new Promise((resolve, reject) => {
-      const element = new Image();
-      element.onload = () => resolve(element);
-      element.onerror = reject;
-      element.src = imageUrl;
-    });
-    return image;
-  } finally {
-    URL.revokeObjectURL(imageUrl);
-  }
+function resetCropToFullImage() {
+  cropRect = {
+    x: 0,
+    y: 0,
+    width: previewWidth,
+    height: previewHeight,
+  };
 }
 
 function prepareCanvas(width, height) {
   const longestSide = Math.max(width, height);
   const scale = Math.min(1, 1800 / longestSide);
-  canvas.width = Math.max(1, Math.round(width * scale));
-  canvas.height = Math.max(1, Math.round(height * scale));
+  previewWidth = Math.max(1, Math.round(width * scale));
+  previewHeight = Math.max(1, Math.round(height * scale));
+  canvas.width = previewWidth;
+  canvas.height = previewHeight;
 }
 
-function renderFisheye() {
-  const width = canvas.width;
-  const height = canvas.height;
-  const offscreen = document.createElement("canvas");
-  const offscreenContext = offscreen.getContext("2d", { willReadFrequently: true });
+function renderLivePreview() {
+  if (!sourceBitmap || !cropRect) {
+    return;
+  }
 
-  offscreen.width = width;
-  offscreen.height = height;
-  offscreenContext.drawImage(sourceBitmap, 0, 0, width, height);
+  canvas.width = previewWidth;
+  canvas.height = previewHeight;
+  const crop = sanitizeCropRect(cropRect, previewWidth, previewHeight);
+  const output = createResultCanvas(crop);
 
-  const source = offscreenContext.getImageData(0, 0, width, height);
-  const result = context.createImageData(width, height);
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(output, crop.x, crop.y);
+}
+
+function createResultCanvas(crop) {
+  const outputCanvas = document.createElement("canvas");
+  const outputContext = outputCanvas.getContext("2d", { willReadFrequently: true });
+
+  const sourceCanvas = document.createElement("canvas");
+  const sourceContext = sourceCanvas.getContext("2d", { willReadFrequently: true });
+  sourceCanvas.width = previewWidth;
+  sourceCanvas.height = previewHeight;
+  sourceContext.drawImage(sourceBitmap, 0, 0, previewWidth, previewHeight);
+
+  const outputWidth = Math.max(1, Math.round(crop.width));
+  const outputHeight = Math.max(1, Math.round(crop.height));
+  outputCanvas.width = outputWidth;
+  outputCanvas.height = outputHeight;
+
+  const source = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+  const result = outputContext.createImageData(outputWidth, outputHeight);
   const strength = Number(strengthInput.value) / 100;
   const intensity = strength * 1.4;
-  const lensCenterX = (width - 1) / 2;
-  const lensCenterY = (height - 1) / 2;
-  const distortionCenterX = distortionCenter.x * (width - 1);
-  const distortionCenterY = distortionCenter.y * (height - 1);
-  const radius = Math.min(width, height) / 2;
-  const backgroundColor = hexToRgb(backgroundColorInput.value);
 
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const dx = x - lensCenterX;
-      const dy = y - lensCenterY;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      const targetIndex = (y * width + x) * 4;
+  for (let y = 0; y < outputHeight; y += 1) {
+    for (let x = 0; x < outputWidth; x += 1) {
+      const targetIndex = (y * outputWidth + x) * 4;
 
-      if (distance > radius) {
-        fillPixel(result.data, targetIndex, getBackgroundColor(x, y, width, height, backgroundColor));
+      if (!isInsideShape(x, y, outputWidth, outputHeight)) {
+        fillPixel(result.data, targetIndex, getBackgroundColor(x, y, outputWidth, outputHeight));
         continue;
       }
 
-      if (strength === 0) {
-        sampleBilinear(source.data, result.data, width, height, x, y, targetIndex);
-        continue;
-      }
-
-      const normalized = distance / radius;
-      const angle = Math.atan2(dy, dx);
-      const directionX = Math.cos(angle);
-      const directionY = Math.sin(angle);
-      const sourceBoundary = getRayToRectangleDistance(
-        distortionCenterX,
-        distortionCenterY,
-        directionX,
-        directionY,
-        width,
-        height,
-      );
-      const sourceRadius = Math.pow(normalized, 1 + intensity) * sourceBoundary;
-      const sourceX = distortionCenterX + directionX * sourceRadius;
-      const sourceY = distortionCenterY + directionY * sourceRadius;
-
-      if (sourceX < 0 || sourceY < 0 || sourceX > width - 1 || sourceY > height - 1) {
-        fillPixel(result.data, targetIndex, getBackgroundColor(x, y, width, height, backgroundColor));
-        continue;
-      }
-
-      sampleBilinear(source.data, result.data, width, height, sourceX, sourceY, targetIndex);
+      const sourcePoint = getFisheyeSourcePoint(x, y, outputWidth, outputHeight, strength, intensity);
+      const sourceX = crop.x + sourcePoint.x;
+      const sourceY = crop.y + sourcePoint.y;
+      sampleBilinear(source.data, result.data, sourceCanvas.width, sourceCanvas.height, sourceX, sourceY, targetIndex);
     }
   }
 
-  context.putImageData(result, 0, 0);
+  outputContext.putImageData(result, 0, 0);
+  return outputCanvas;
 }
 
-function getRayToRectangleDistance(originX, originY, directionX, directionY, width, height) {
-  const distances = [];
-
-  if (Math.abs(directionX) > 0.000001) {
-    distances.push((0 - originX) / directionX);
-    distances.push((width - 1 - originX) / directionX);
+function getFisheyeSourcePoint(x, y, width, height, strength, intensity) {
+  if (strength === 0) {
+    return { x, y };
   }
 
-  if (Math.abs(directionY) > 0.000001) {
-    distances.push((0 - originY) / directionY);
-    distances.push((height - 1 - originY) / directionY);
+  const centerX = (width - 1) / 2;
+  const centerY = (height - 1) / 2;
+  const dx = x - centerX;
+  const dy = y - centerY;
+  const lensRadius = Math.min(width, height) / 2;
+  const distance = Math.hypot(dx, dy);
+  const normalized = distance / lensRadius;
+  const sourceRadius = Math.pow(normalized, 1 + intensity) * lensRadius;
+  const scale = distance === 0 ? 0 : sourceRadius / distance;
+
+  return {
+    x: centerX + dx * scale,
+    y: centerY + dy * scale,
+  };
+}
+
+function isInsideShape(x, y, width, height) {
+  if (cropShape === "square") {
+    return true;
   }
 
-  const validDistances = distances.filter((distance) => distance >= 0);
-  return validDistances.length > 0 ? Math.min(...validDistances) : 0;
+  if (cropShape === "rounded") {
+    const radius = Math.min(width, height) * 0.18;
+    const insideCenter = x >= radius && x <= width - radius && y >= radius && y <= height - radius;
+    const insideEdge = (x >= radius && x <= width - radius) || (y >= radius && y <= height - radius);
+
+    if (insideCenter || insideEdge) {
+      return true;
+    }
+
+    const cornerX = x < radius ? radius : width - radius;
+    const cornerY = y < radius ? radius : height - radius;
+    return Math.hypot(x - cornerX, y - cornerY) <= radius;
+  }
+
+  const centerX = (width - 1) / 2;
+  const centerY = (height - 1) / 2;
+  const radius = Math.min(width, height) / 2;
+  return Math.hypot(x - centerX, y - centerY) <= radius;
+}
+
+function updateCropFromDrag(point) {
+  const dx = point.x - dragState.startPoint.x;
+  const dy = point.y - dragState.startPoint.y;
+  const rect = { ...dragState.startRect };
+
+  if (dragState.handle === "move") {
+    cropRect = sanitizeCropRect({
+      ...rect,
+      x: rect.x + dx,
+      y: rect.y + dy,
+    });
+    return;
+  }
+
+  const left = rect.x;
+  const right = rect.x + rect.width;
+  const top = rect.y;
+  const bottom = rect.y + rect.height;
+  let nextLeft = left;
+  let nextRight = right;
+  let nextTop = top;
+  let nextBottom = bottom;
+
+  if (dragState.handle.includes("w")) {
+    nextLeft = clamp(left + dx, 0, right - minCropSize);
+  }
+  if (dragState.handle.includes("e")) {
+    nextRight = clamp(right + dx, left + minCropSize, canvas.width);
+  }
+  if (dragState.handle.includes("n")) {
+    nextTop = clamp(top + dy, 0, bottom - minCropSize);
+  }
+  if (dragState.handle.includes("s")) {
+    nextBottom = clamp(bottom + dy, top + minCropSize, canvas.height);
+  }
+
+  cropRect = sanitizeCropRect({
+    x: nextLeft,
+    y: nextTop,
+    width: nextRight - nextLeft,
+    height: nextBottom - nextTop,
+  });
+}
+
+function updateCropBoxPosition() {
+  if (!cropRect || !cropBox.classList.contains("is-visible")) {
+    return;
+  }
+
+  const canvasRect = canvas.getBoundingClientRect();
+  const stageRect = dropZone.getBoundingClientRect();
+  const scaleX = canvasRect.width / canvas.width;
+  const scaleY = canvasRect.height / canvas.height;
+
+  cropBox.style.left = `${canvasRect.left - stageRect.left + cropRect.x * scaleX}px`;
+  cropBox.style.top = `${canvasRect.top - stageRect.top + cropRect.y * scaleY}px`;
+  cropBox.style.width = `${cropRect.width * scaleX}px`;
+  cropBox.style.height = `${cropRect.height * scaleY}px`;
+}
+
+function endCropDrag(event) {
+  if (!dragState || event.pointerId !== dragState.pointerId) {
+    return;
+  }
+
+  dragState = null;
+}
+
+function openBackgroundModal() {
+  backgroundModal.classList.add("is-open");
+  backgroundModal.setAttribute("aria-hidden", "false");
+}
+
+function closeBackgroundModal() {
+  backgroundModal.classList.remove("is-open");
+  backgroundModal.setAttribute("aria-hidden", "true");
+}
+
+function openShapeModal() {
+  shapeModal.classList.add("is-open");
+  shapeModal.setAttribute("aria-hidden", "false");
+}
+
+function closeShapeModal() {
+  shapeModal.classList.remove("is-open");
+  shapeModal.setAttribute("aria-hidden", "true");
+}
+
+function updateBackgroundControls() {
+  modeButtons.forEach((button) => {
+    button.classList.toggle("is-selected", button.dataset.backgroundMode === background.mode);
+  });
+
+  solidPanel.classList.toggle("is-hidden", background.mode !== "solid");
+  gradientPanel.classList.toggle("is-hidden", background.mode !== "gradient");
+  swatchButtons.forEach((button) => {
+    button.classList.toggle("is-selected", button.dataset.solidColor === background.solid);
+  });
+
+  gradientStartButtons.forEach((button) => {
+    button.classList.toggle("is-selected", button.dataset.gradientStartColor === background.gradientStart);
+  });
+
+  gradientEndButtons.forEach((button) => {
+    button.classList.toggle("is-selected", button.dataset.gradientEndColor === background.gradientEnd);
+  });
+}
+
+function updateShapeControls() {
+  shapeOptionButtons.forEach((button) => {
+    button.classList.toggle("is-selected", button.dataset.cropShape === cropShape);
+  });
+}
+
+function downloadImage() {
+  if (!sourceBitmap || !cropRect) {
+    return;
+  }
+
+  const link = document.createElement("a");
+  const extension = outputType === "image/webp" ? "webp" : "png";
+  const crop = sanitizeCropRect(cropRect, previewWidth, previewHeight);
+  const output = createResultCanvas(crop);
+
+  link.download = `${sourceName}-fisheye.${extension}`;
+  link.href = output.toDataURL(outputType);
+  link.click();
+}
+
+function getBackgroundColor(x, y, width, height) {
+  if (background.mode === "solid") {
+    return hexToRgb(background.solid);
+  }
+
+  const start = hexToRgb(background.gradientStart);
+  const end = hexToRgb(background.gradientEnd);
+  const horizontal = width <= 1 ? 0 : x / (width - 1);
+  const vertical = height <= 1 ? 0 : y / (height - 1);
+  return mixColor(start, end, clamp(horizontal * 0.74 + vertical * 0.26, 0, 1));
+}
+
+function getCanvasPoint(event) {
+  const rect = canvas.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+
+  return {
+    x: clamp((x / rect.width) * canvas.width, 0, canvas.width),
+    y: clamp((y / rect.height) * canvas.height, 0, canvas.height),
+  };
+}
+
+function sanitizeCropRect(rect, boundsWidth = canvas.width, boundsHeight = canvas.height) {
+  const width = Math.min(Math.max(rect.width, minCropSize), boundsWidth);
+  const height = Math.min(Math.max(rect.height, minCropSize), boundsHeight);
+
+  return {
+    x: clamp(rect.x, 0, boundsWidth - width),
+    y: clamp(rect.y, 0, boundsHeight - height),
+    width,
+    height,
+  };
 }
 
 function sampleBilinear(source, target, width, height, x, y, targetIndex) {
@@ -270,38 +569,32 @@ function fillPixel(target, targetIndex, color) {
   target[targetIndex + 3] = 255;
 }
 
-function getBackgroundColor(x, y, width, height, fallbackColor) {
-  if (backgroundPreset !== "gradient") {
-    return fallbackColor;
-  }
-
-  const horizontal = width <= 1 ? 0 : x / (width - 1);
-  const vertical = height <= 1 ? 0 : y / (height - 1);
-  const first = { r: 255, g: 208, b: 47 };
-  const middle = { r: 12, g: 166, b: 120 };
-  const last = { r: 66, g: 98, b: 255 };
-
-  if (horizontal < 0.5) {
-    return mixColor(first, middle, horizontal * 2);
-  }
-
-  return mixColor(middle, last, (horizontal - 0.5) * 2 + vertical * 0.18);
+function isImageFile(file) {
+  const imageExtensions = /\.(avif|bmp|gif|heic|heif|jpeg|jpg|png|svg|tif|tiff|webp)$/i;
+  return file.type.startsWith("image/") || imageExtensions.test(file.name);
 }
 
-function mixColor(start, end, amount) {
-  const ratio = clamp(amount, 0, 1);
+async function decodeImage(file) {
+  if ("createImageBitmap" in window) {
+    return createImageBitmap(file, { imageOrientation: "from-image" });
+  }
 
-  return {
-    r: Math.round(lerp(start.r, end.r, ratio)),
-    g: Math.round(lerp(start.g, end.g, ratio)),
-    b: Math.round(lerp(start.b, end.b, ratio)),
-  };
+  const imageUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = reject;
+      element.src = imageUrl;
+    });
+    return image;
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
 }
 
 function hexToRgb(hex) {
-  const normalized = hex.replace("#", "");
-  const value = Number.parseInt(normalized, 16);
-
+  const value = Number.parseInt(hex.replace("#", ""), 16);
   return {
     r: (value >> 16) & 255,
     g: (value >> 8) & 255,
@@ -309,89 +602,12 @@ function hexToRgb(hex) {
   };
 }
 
-function updatePresetButtons() {
-  presetButtons.forEach((button) => {
-    button.classList.toggle("is-selected", button.dataset.backgroundPreset === backgroundPreset);
-  });
-}
-
-function downloadImage() {
-  const link = document.createElement("a");
-  const extension = outputType === "image/webp" ? "webp" : "png";
-
-  link.download = `${sourceName}-fisheye.${extension}`;
-  link.href = canvas.toDataURL(outputType);
-  link.click();
-}
-
-function getCanvasPoint(event) {
-  const rect = canvas.getBoundingClientRect();
-  const x = event.clientX - rect.left;
-  const y = event.clientY - rect.top;
-
-  if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
-    return null;
-  }
-
+function mixColor(start, end, amount) {
   return {
-    x: clamp((x / rect.width) * (canvas.width - 1), 0, canvas.width - 1),
-    y: clamp((y / rect.height) * (canvas.height - 1), 0, canvas.height - 1),
+    r: Math.round(lerp(start.r, end.r, amount)),
+    g: Math.round(lerp(start.g, end.g, amount)),
+    b: Math.round(lerp(start.b, end.b, amount)),
   };
-}
-
-function isPointInsideLens(x, y) {
-  const centerX = (canvas.width - 1) / 2;
-  const centerY = (canvas.height - 1) / 2;
-  const radius = Math.min(canvas.width, canvas.height) / 2;
-
-  return Math.hypot(x - centerX, y - centerY) <= radius;
-}
-
-function updateFocusPoint() {
-  if (!sourceBitmap) {
-    return;
-  }
-
-  const canvasRect = canvas.getBoundingClientRect();
-  const stageRect = dropZone.getBoundingClientRect();
-  const left = canvasRect.left - stageRect.left + canvasRect.width * distortionCenter.x;
-  const top = canvasRect.top - stageRect.top + canvasRect.height * distortionCenter.y;
-
-  focusPoint.style.left = `${left}px`;
-  focusPoint.style.top = `${top}px`;
-}
-
-function resetWorkspace() {
-  if (sourceBitmap) {
-    resetControlsToUploadDefaults();
-    renderFisheye();
-    updateFocusPoint();
-    setStatus("업로드 초기 상태로 되돌림");
-    return;
-  }
-
-  sourceBitmap = null;
-  fileInput.value = "";
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  canvas.removeAttribute("width");
-  canvas.removeAttribute("height");
-  dropZone.classList.remove("has-image");
-  emptyState.classList.remove("is-hidden");
-  focusPoint.disabled = true;
-  focusPoint.classList.remove("is-visible");
-  focusPoint.removeAttribute("style");
-  downloadButton.disabled = true;
-  resetButton.disabled = true;
-  setStatus("");
-}
-
-function resetControlsToUploadDefaults() {
-  distortionCenter = { x: 0.5, y: 0.5 };
-  backgroundPreset = "white";
-  backgroundColorInput.value = "#ffffff";
-  strengthInput.value = "0";
-  strengthOutput.value = "0";
-  updatePresetButtons();
 }
 
 function setStatus(message) {

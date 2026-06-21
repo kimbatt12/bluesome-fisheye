@@ -21,13 +21,13 @@
 
         <div class="stage" id="dropZone">
           <canvas id="previewCanvas" aria-label="변환 미리보기"></canvas>
-          <button
-            class="focus-point"
-            id="focusPoint"
-            type="button"
-            aria-label="왜곡 기준점"
-            disabled
-          ></button>
+          <div class="crop-box" id="cropBox">
+            <button class="crop-move" type="button" data-crop-handle="move" aria-label="크롭 위치 이동"></button>
+            <button class="crop-corner north-west" type="button" data-crop-handle="nw" aria-label="왼쪽 위 모서리 이동"></button>
+            <button class="crop-corner north-east" type="button" data-crop-handle="ne" aria-label="오른쪽 위 모서리 이동"></button>
+            <button class="crop-corner south-west" type="button" data-crop-handle="sw" aria-label="왼쪽 아래 모서리 이동"></button>
+            <button class="crop-corner south-east" type="button" data-crop-handle="se" aria-label="오른쪽 아래 모서리 이동"></button>
+          </div>
           <div class="empty-state" id="emptyState">
             <div class="lens-mark" aria-hidden="true"></div>
             <strong>이미지를 업로드하세요</strong>
@@ -41,35 +41,19 @@
             <output id="strengthOutput" for="strengthInput">0</output>
           </label>
 
-          <label class="color-control">
-            <span>배경</span>
-            <input id="backgroundColorInput" type="color" value="#ffffff" />
-          </label>
-
-          <div class="preset-control" aria-label="배경 프리셋">
-            <span>프리셋</span>
-            <div class="preset-options">
-              <button class="preset-button" type="button" data-background-preset="black">
-                검정
-              </button>
-              <button
-                class="preset-button is-selected"
-                type="button"
-                data-background-preset="white"
-              >
-                하양
-              </button>
-              <button class="preset-button gradient" type="button" data-background-preset="gradient">
-                그라데이션
-              </button>
-            </div>
-          </div>
-
           <div class="actions">
             <label class="button primary" for="fileInput">
               <span aria-hidden="true">↑</span>
               업로드
             </label>
+            <button class="button secondary" id="shapeButton" type="button" disabled>
+              <span aria-hidden="true">□</span>
+              모양
+            </button>
+            <button class="button secondary" id="backgroundButton" type="button" disabled>
+              <span aria-hidden="true">◐</span>
+              배경
+            </button>
             <button class="button secondary" id="downloadButton" type="button" disabled>
               <span aria-hidden="true">↓</span>
               다운로드
@@ -87,6 +71,92 @@
       type="file"
       accept="image/*,.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,.avif,.heic,.heif,.tif,.tiff"
     />
+
+    <div class="modal-backdrop" id="backgroundModal" aria-hidden="true">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="backgroundTitle">
+        <header class="modal-header">
+          <h2 id="backgroundTitle">배경</h2>
+          <button class="icon-button" id="closeBackgroundButton" type="button" aria-label="닫기">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+
+        <div class="mode-tabs" role="tablist" aria-label="배경 모드">
+          <button class="mode-tab is-selected" type="button" data-background-mode="solid">단색</button>
+          <button class="mode-tab" type="button" data-background-mode="gradient">그라데이션</button>
+        </div>
+
+        <div class="background-panel" id="solidPanel">
+          <div class="swatches" aria-label="단색 프리셋">
+            <button class="swatch is-selected" type="button" data-solid-color="#ffffff" style="--swatch: #ffffff" aria-label="하양"></button>
+            <button class="swatch" type="button" data-solid-color="#000000" style="--swatch: #000000" aria-label="검정"></button>
+            <button class="swatch" type="button" data-solid-color="#ffd02f" style="--swatch: #ffd02f" aria-label="노랑"></button>
+            <button class="swatch" type="button" data-solid-color="#4262ff" style="--swatch: #4262ff" aria-label="파랑"></button>
+            <button class="swatch" type="button" data-solid-color="#0ca678" style="--swatch: #0ca678" aria-label="초록"></button>
+            <button class="swatch" type="button" data-solid-color="#92A8D1" style="--swatch: #92A8D1" aria-label="Serenity"></button>
+            <button class="swatch" type="button" data-solid-color="#F7CAC9" style="--swatch: #F7CAC9" aria-label="Rose Quartz"></button>
+            <button class="swatch" type="button" data-solid-color="#5F4B8B" style="--swatch: #5F4B8B" aria-label="Ultra Violet"></button>
+          </div>
+          <label class="color-row">
+            <span>컬러</span>
+            <input id="solidColorInput" type="color" value="#ffffff" />
+          </label>
+        </div>
+
+        <div class="background-panel is-hidden" id="gradientPanel">
+          <label class="color-row">
+            <span>시작</span>
+            <input id="gradientStartInput" type="color" value="#ffd02f" />
+          </label>
+          <div class="swatches" aria-label="그라데이션 시작 색상 프리셋">
+            <button class="swatch" type="button" data-gradient-start-color="#ffffff" style="--swatch: #ffffff" aria-label="시작 하양"></button>
+            <button class="swatch" type="button" data-gradient-start-color="#000000" style="--swatch: #000000" aria-label="시작 검정"></button>
+            <button class="swatch is-selected" type="button" data-gradient-start-color="#ffd02f" style="--swatch: #ffd02f" aria-label="시작 노랑"></button>
+            <button class="swatch" type="button" data-gradient-start-color="#92A8D1" style="--swatch: #92A8D1" aria-label="시작 Serenity"></button>
+            <button class="swatch" type="button" data-gradient-start-color="#F7CAC9" style="--swatch: #F7CAC9" aria-label="시작 Rose Quartz"></button>
+            <button class="swatch" type="button" data-gradient-start-color="#5F4B8B" style="--swatch: #5F4B8B" aria-label="시작 Ultra Violet"></button>
+          </div>
+          <label class="color-row">
+            <span>끝</span>
+            <input id="gradientEndInput" type="color" value="#4262ff" />
+          </label>
+          <div class="swatches" aria-label="그라데이션 끝 색상 프리셋">
+            <button class="swatch" type="button" data-gradient-end-color="#ffffff" style="--swatch: #ffffff" aria-label="끝 하양"></button>
+            <button class="swatch" type="button" data-gradient-end-color="#000000" style="--swatch: #000000" aria-label="끝 검정"></button>
+            <button class="swatch is-selected" type="button" data-gradient-end-color="#4262ff" style="--swatch: #4262ff" aria-label="끝 파랑"></button>
+            <button class="swatch" type="button" data-gradient-end-color="#92A8D1" style="--swatch: #92A8D1" aria-label="끝 Serenity"></button>
+            <button class="swatch" type="button" data-gradient-end-color="#F7CAC9" style="--swatch: #F7CAC9" aria-label="끝 Rose Quartz"></button>
+            <button class="swatch" type="button" data-gradient-end-color="#5F4B8B" style="--swatch: #5F4B8B" aria-label="끝 Ultra Violet"></button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="shapeModal" aria-hidden="true">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="shapeTitle">
+        <header class="modal-header">
+          <h2 id="shapeTitle">모양</h2>
+          <button class="icon-button" id="closeShapeButton" type="button" aria-label="닫기">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+
+        <div class="shape-options" aria-label="크롭 모양">
+          <button class="shape-option is-selected" type="button" data-crop-shape="circle">
+            <span class="shape-icon circle" aria-hidden="true"></span>
+            원형
+          </button>
+          <button class="shape-option" type="button" data-crop-shape="square">
+            <span class="shape-icon square" aria-hidden="true"></span>
+            사각형
+          </button>
+          <button class="shape-option" type="button" data-crop-shape="rounded">
+            <span class="shape-icon rounded" aria-hidden="true"></span>
+            둥근사각
+          </button>
+        </div>
+      </section>
+    </div>
 
     <script src="script.js"></script>
   </body>
